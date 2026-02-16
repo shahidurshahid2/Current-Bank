@@ -1,0 +1,5 @@
+{
+  "name": "Current Bank",
+  "description": "A real-time financial dashboard connecting to Google Sheets, featuring AI analysis.",
+  "requestFramePermissions": []
+}
