@@ -1,11 +1,11 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import { Transaction } from '../types';
 
-let ai: GoogleGenerativeAI | null = null;
+let ai: GoogleGenAI | null = null;
 
 try {
     if (process.env.API_KEY) {
-        ai = new GoogleGenerativeAI(process.env.API_KEY);
+        ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     }
 } catch (e) {
     console.error("Error initializing Gemini:", e);
@@ -42,10 +42,11 @@ export const analyzeData = async (transactions: Transaction[], query: string): P
   `;
 
   try {
-    const model = ai.getGenerativeModel({ model: 'gemini-2.0-flash-exp' });
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    return response.text() || "I couldn't generate an analysis at this time.";
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.5-flash-latest',
+      contents: prompt,
+    });
+    return response.text || "I couldn't generate an analysis at this time.";
   } catch (error) {
     console.error("Gemini Analysis Error:", error);
     return "Sorry, I encountered an error while analyzing your data.";
