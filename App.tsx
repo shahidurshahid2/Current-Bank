@@ -8,7 +8,11 @@ import {
   Wallet,
   Calendar,
   ExternalLink,
-  Share2
+  Share2,
+  Download,
+  PlusSquare,
+  MoreVertical,
+  X
 } from 'lucide-react';
 
 import { Transaction, SheetStats, MonthYear } from './types';
@@ -46,10 +50,88 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(() => {
+    // If we have a URL in query params, don't open settings automatically
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('sheet')) return false;
+
     const hasUrl = localStorage.getItem('sheet_raw_url') || DEFAULT_SHEET_URL;
     return !hasUrl;
   });
   const [activeTab, setActiveTab] = useState<'dashboard' | 'transactions' | 'ai'>('dashboard');
+
+  // PWA Install State
+  const [installPrompt, setInstallPrompt] = useState<any>(null);
+  const [isIOS, setIsIOS] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+  
+  // Modals for manual installation help
+  const [showIOSPrompt, setShowIOSPrompt] = useState(false);
+  const [showAndroidPrompt, setShowAndroidPrompt] = useState(false);
+
+  // Deep Link Logic: Check for ?sheet=URL in the browser address bar
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sheetParam = params.get('sheet');
+    
+    if (sheetParam) {
+      try {
+        // Decode the URL (URLSearchParams handles percent decoding automatically for .get(), 
+        // but explicit decodeURIComponent is safer if double encoded)
+        const decodedUrl = sheetParam; 
+        
+        // Update state and storage immediately
+        if (decodedUrl !== userUrl) {
+            setUserUrl(decodedUrl);
+            localStorage.setItem('sheet_raw_url', decodedUrl);
+            setCsvUrl(convertToCsvUrl(decodedUrl));
+        }
+        
+        // Optional: Clean up the URL bar so it looks nice (removes the long query string)
+        window.history.replaceState({}, '', window.location.pathname);
+      } catch (e) {
+        console.error("Error parsing sheet parameter", e);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    // Detect if already installed/standalone
+    const isStandaloneMode = window.matchMedia('(display-mode: standalone)').matches || (window.navigator as any).standalone;
+    setIsStandalone(isStandaloneMode);
+
+    // Detect iOS
+    const userAgent = window.navigator.userAgent.toLowerCase();
+    const isIphone = /iphone|ipad|ipod/.test(userAgent);
+    setIsIOS(isIphone);
+
+    // Android/Desktop Install Prompt
+    const handler = (e: any) => {
+      e.preventDefault();
+      setInstallPrompt(e);
+      console.log("Install prompt captured");
+    };
+    window.addEventListener('beforeinstallprompt', handler);
+    return () => window.removeEventListener('beforeinstallprompt', handler);
+  }, []);
+
+  const handleInstallClick = () => {
+    if (isIOS) {
+      // iOS always needs manual instructions
+      setShowIOSPrompt(true);
+    } else if (installPrompt) {
+      // If we have the system prompt captured, use it
+      installPrompt.prompt();
+      installPrompt.userChoice.then((choiceResult: any) => {
+        if (choiceResult.outcome === 'accepted') {
+          console.log('User accepted the install prompt');
+        }
+        setInstallPrompt(null);
+      });
+    } else {
+      // If Android/Desktop but no prompt (browser restricted or already dismissed), show manual instructions
+      setShowAndroidPrompt(true);
+    }
+  };
 
   const handleUrlSave = (newUrl: string) => {
     setUserUrl(newUrl);
@@ -63,8 +145,6 @@ function App() {
 
   const fetchData = useCallback(async () => {
     if (!csvUrl) return;
-    // Don't set loading to true on background polls to avoid flickering
-    // We only set error if it fails hard
     try {
       const fetchUrl = csvUrl.includes('?') ? `${csvUrl}&t=${Date.now()}` : `${csvUrl}?t=${Date.now()}`;
       const res = await fetch(fetchUrl);
@@ -72,10 +152,6 @@ function App() {
       
       const text = await res.text();
       const transactions = parseCSV(text);
-      
-      if (transactions.length === 0) {
-        console.warn("Parsed 0 rows.");
-      }
       
       setAllData(transactions);
       setError(null);
@@ -85,15 +161,15 @@ function App() {
     }
   }, [csvUrl]);
 
-  // Initial Fetch with Loading State
+  // Initial Fetch
   useEffect(() => {
     if (csvUrl) {
         setLoading(true);
         fetchData().finally(() => setLoading(false));
     }
-  }, [csvUrl]); // Remove fetchData from dependency to avoid loop if fetchData changes, though useCallback handles it.
+  }, [csvUrl]); 
 
-  // Fast Polling (Every 3 seconds for immediate sync)
+  // Polling
   useEffect(() => {
     if (!csvUrl) return;
     const interval = setInterval(fetchData, 3000); 
@@ -121,20 +197,30 @@ function App() {
   };
 
   const handleShare = async () => {
+    // Generate a Share Link that includes the specific Sheet URL
+    const urlObj = new URL(window.location.origin + window.location.pathname);
+    
+    // Only append param if it's not the default sheet
+    if (userUrl && userUrl !== DEFAULT_SHEET_URL) {
+      // URLSearchParams automatically encodes values
+      urlObj.searchParams.set('sheet', userUrl);
+    }
+    
+    const shareableLink = urlObj.toString();
+
     if (navigator.share) {
       try {
         await navigator.share({
           title: 'Current Bank',
-          text: 'Join me on Current Bank to manage our shared finances!',
-          url: window.location.href,
+          text: 'Check out this financial dashboard!',
+          url: shareableLink,
         });
       } catch (err) {
-        // User cancelled share
         console.debug("Share cancelled");
       }
     } else {
-      navigator.clipboard.writeText(window.location.href);
-      alert('App link copied to clipboard!');
+      navigator.clipboard.writeText(shareableLink);
+      alert('Shareable link copied to clipboard!');
     }
   };
 
@@ -149,16 +235,10 @@ function App() {
             {/* Logo */}
             <div className="flex items-center w-full md:w-auto justify-between">
                 <div className="flex items-center gap-3">
-                    {/* User Logo Image */}
                     <img 
-                        src="logo.png" 
+                        src="https://cdn-icons-png.flaticon.com/512/2830/2830284.png" 
                         alt="Current Bank Logo" 
                         className="w-10 h-10 rounded-lg shadow-lg shadow-primary-500/20 object-contain bg-slate-800"
-                        onError={(e) => {
-                            // Fallback if logo.png is missing
-                            e.currentTarget.style.display = 'none';
-                            e.currentTarget.nextElementSibling?.classList.remove('hidden');
-                        }}
                     />
                     <div className="w-10 h-10 bg-gradient-to-tr from-primary-600 to-indigo-600 rounded-lg flex items-center justify-center shadow-lg shadow-primary-500/20 hidden">
                         <span className="font-bold text-white">CB</span>
@@ -168,7 +248,12 @@ function App() {
                 </div>
 
                 <div className="flex md:hidden gap-1">
-                     <button onClick={handleShare} className="p-2 text-primary-400 hover:text-white" title="Share App">
+                     {!isStandalone && (
+                         <button onClick={handleInstallClick} className="p-2 text-primary-400 hover:text-white" title="Install App">
+                            <Download size={18} />
+                         </button>
+                     )}
+                     <button onClick={handleShare} className="p-2 text-slate-400 hover:text-white" title="Share App">
                         <Share2 size={18} />
                     </button>
                     <button onClick={() => { setLoading(true); fetchData().finally(() => setLoading(false)); }} className="p-2 text-slate-400 hover:text-white">
@@ -205,11 +290,19 @@ function App() {
 
             {/* Desktop Actions */}
             <div className="hidden md:flex items-center gap-3">
+              {!isStandalone && (
+                 <button 
+                    onClick={handleInstallClick}
+                    className="flex items-center gap-2 px-3 py-1.5 text-xs font-bold bg-primary-600 text-white rounded-lg hover:bg-primary-500 transition-colors shadow-lg shadow-primary-500/30"
+                  >
+                    <Download size={14} /> Install App
+                  </button>
+              )}
               <button 
                 onClick={handleShare}
                 className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium bg-primary-900/30 text-primary-300 border border-primary-500/30 rounded-lg hover:bg-primary-900/50 transition-colors"
               >
-                <Share2 size={14} /> Share App
+                <Share2 size={14} /> Share
               </button>
               <button 
                 onClick={openSheet}
@@ -343,6 +436,104 @@ function App() {
           </div>
         )}
       </main>
+
+      {/* IOS INSTRUCTION MODAL */}
+      {showIOSPrompt && (
+        <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm shadow-2xl p-6 relative">
+            <button 
+                onClick={() => setShowIOSPrompt(false)}
+                className="absolute top-4 right-4 text-slate-400 hover:text-white"
+            >
+                <X size={20} />
+            </button>
+            
+            <div className="flex flex-col items-center text-center space-y-4">
+                <div className="w-12 h-12 bg-primary-600/20 rounded-xl flex items-center justify-center text-primary-500 mb-2">
+                    <Download size={24} />
+                </div>
+                <h3 className="text-lg font-bold text-white">Install on iPhone</h3>
+                <p className="text-sm text-slate-300">
+                    iOS requires a manual step to install this app.
+                </p>
+                
+                <div className="w-full bg-slate-950 p-4 rounded-xl border border-slate-800 text-left space-y-3 text-sm text-slate-300">
+                    <div className="flex items-center gap-3">
+                        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-slate-800 text-xs font-bold">1</span>
+                        <span>Tap the <span className="font-bold text-primary-400">Share</span> button in Safari.</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-slate-800 text-xs font-bold">2</span>
+                        <div className="flex items-center gap-2">
+                            <span>Scroll down and tap</span>
+                            <span className="flex items-center gap-1 font-bold text-white bg-slate-800 px-2 py-1 rounded">
+                                <PlusSquare size={14} /> Add to Home Screen
+                            </span>
+                        </div>
+                    </div>
+                </div>
+
+                <button 
+                    onClick={() => setShowIOSPrompt(false)}
+                    className="w-full py-3 bg-primary-600 text-white rounded-xl font-medium mt-2"
+                >
+                    Got it
+                </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ANDROID INSTRUCTION MODAL */}
+      {showAndroidPrompt && (
+        <div className="fixed inset-0 z-[60] flex items-end md:items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+          <div className="bg-slate-900 border border-slate-700 rounded-2xl w-full max-w-sm shadow-2xl p-6 relative">
+            <button 
+                onClick={() => setShowAndroidPrompt(false)}
+                className="absolute top-4 right-4 text-slate-400 hover:text-white"
+            >
+                <X size={20} />
+            </button>
+            
+            <div className="flex flex-col items-center text-center space-y-4">
+                <div className="w-12 h-12 bg-primary-600/20 rounded-xl flex items-center justify-center text-primary-500 mb-2">
+                    <Download size={24} />
+                </div>
+                <h3 className="text-lg font-bold text-white">Install App</h3>
+                <p className="text-sm text-slate-300">
+                   The automatic installer isn't ready yet. You can install it manually:
+                </p>
+                
+                <div className="w-full bg-slate-950 p-4 rounded-xl border border-slate-800 text-left space-y-3 text-sm text-slate-300">
+                    <div className="flex items-center gap-3">
+                        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-slate-800 text-xs font-bold">1</span>
+                        <div className="flex items-center gap-2">
+                            <span>Tap the <strong>3 dots</strong> menu</span>
+                            <MoreVertical size={14} />
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        <span className="flex items-center justify-center w-6 h-6 rounded-full bg-slate-800 text-xs font-bold">2</span>
+                        <div className="flex items-center gap-2">
+                            <span>Select</span>
+                            <span className="font-bold text-white bg-slate-800 px-2 py-1 rounded">
+                                Install App
+                            </span>
+                             <span className="text-xs opacity-70">or Add to Home Screen</span>
+                        </div>
+                    </div>
+                </div>
+
+                <button 
+                    onClick={() => setShowAndroidPrompt(false)}
+                    className="w-full py-3 bg-primary-600 text-white rounded-xl font-medium mt-2"
+                >
+                    Got it
+                </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <SettingsModal 
         isOpen={isSettingsOpen} 
