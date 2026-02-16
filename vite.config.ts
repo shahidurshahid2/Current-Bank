@@ -8,6 +8,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   
   return {
+    base: '/current-bank/',
     plugins: [react()],
     define: {
       // This ensures your code 'process.env.API_KEY' works in the browser
